@@ -13,6 +13,7 @@ struct node{
 };
 
 struct node *list_begin_node[MAXNRANK];
+int unuse_num[MAXNRANK];
 void *beginp;
 int totpg;
 struct node **p_to_node;
@@ -22,14 +23,17 @@ static void InsertNode(int truerank,void *p){
 	if(list_begin_node[truerank]!=NULL)list_begin_node[truerank]->pre=nodep;
 	list_begin_node[truerank]=nodep;
 	p_to_node[(nodep->p-beginp)/4096]=nodep;
+	unuse_num[nodep->rank]++;
 }
-static void DeleteNode(struct node *p){
-	if(p->pre!=NULL)p->pre->next=p->next;
-	if(p->next!=NULL)p->next->pre=p->pre;
-	if(p==list_begin_node[p->rank])list_begin_node[p->rank]=list_begin_node[p->rank]->next;
-	free(p);
+static void DeleteNode(struct node *nodep){
+	if(nodep->pre!=NULL)nodep->pre->next=nodep->next;
+	if(nodep->next!=NULL)nodep->next->pre=nodep->pre;
+	if(nodep==list_begin_node[nodep->rank])list_begin_node[nodep->rank]=list_begin_node[nodep->rank]->next;
+	p_to_node[(nodep->p-beginp)/4096]=NULL;
+	unuse_num[nodep->rank]--;
+	free(nodep);
 }
-static bool FindAndDeleteNode(int truerank,void *p){//查看是否存在&&rank=truerank&&use=0,如果是则删掉并返回1
+static bool CheckAndDeleteNode(int truerank,void *p){//查看是否存在&&rank=truerank&&use=0,如果是则删掉并返回1
 	int pos=(p-beginp)/4096;
 	if(pos==totpg)return 0;
 	if(p_to_node[pos]==NULL)return 0;
@@ -70,6 +74,7 @@ int init_page(void *p, int pgcount){
 	beginp=p,totpg=pgcount;
 	void *currentp=p;
 	for(int i=0;i<MAXNRANK;i++)list_begin_node[i]=NULL;
+	for(int i=0;i<MAXNRANK;i++)unuse_num[i]=0;
 	for(int i=MAXNRANK-1;i>=0;i--){
 		if((pgcount>>i)&1){
 			list_begin_node[i]=malloc(sizeof(struct node));
@@ -80,6 +85,7 @@ int init_page(void *p, int pgcount){
 			list_begin_node[i]->rank=i;
 			p_to_node[(currentp-beginp)/4096]=list_begin_node[i];
 			currentp+=4096*(1<<i);
+			unuse_num[i]++;
 		}
 	}
 	// for(int i=0;i<MAXNRANK;i++){
@@ -94,13 +100,14 @@ void *alloc_pages(int rank){
 	struct node *ansnode=NULL;
 	int ansrank=0;
 	for(int i=rank;i<MAXNRANK;i++){
+		if(!unuse_num[i])continue;
 		for(struct node *now=list_begin_node[i];now!=NULL;now=now->next){
 			if(!now->use){
 				ansnode=now,ansrank=i;
 				break;
 			}
 		}
-		if(ansnode!=NULL)break;
+		break;
 	}
 	if(ansnode==NULL)return -ENOSPC;
 	if(ansrank>rank){
@@ -111,6 +118,7 @@ void *alloc_pages(int rank){
 				InsertNode(i,currentp+4096*(1<<i));
 				InsertNode(i,currentp);
 				p_to_node[(currentp-beginp)/4096]->use=1;
+				unuse_num[rank]--;
 				return currentp;
 			}
 			else {
@@ -120,6 +128,7 @@ void *alloc_pages(int rank){
 	}
 	else {
 		ansnode->use=1;
+		unuse_num[rank]--;
 		return ansnode->p;
 	}
 }
@@ -136,6 +145,7 @@ int return_pages(void *p){
 		if(nodep!=NULL){
 			nodep->use=0;
 			rank=i;
+			unuse_num[rank]++;
 			break;
 		}
 	}
@@ -144,10 +154,9 @@ int return_pages(void *p){
 		void *p2=(p-beginp)%(4096*(1<<(rank+1)))==0 ? p+(4096*(1<<rank)) : p-(4096*(1<<rank));
 		// printf("rank: %d -> %d\n",rank,rank+1);
 		// printf("p=%lx,p2=%lx,xxx=%lx\n",p,p2,p2-beginp);
-		bool isDelete=FindAndDeleteNode(rank,p2);
+		bool isDelete=CheckAndDeleteNode(rank,p2);
 		if(!isDelete)break;
-		FindAndDeleteNode(rank,p);
-		p_to_node[(p-beginp)/4096]=p_to_node[(p2-beginp)/4096]=NULL;
+		CheckAndDeleteNode(rank,p);
 		InsertNode(rank+1,p<p2?p:p2);
 		p=p<p2?p:p2;
 		// printf("rank: %d -> %d\n",rank,rank+1);
