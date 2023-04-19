@@ -16,7 +16,13 @@ struct node *list_begin_node[MAXNRANK];
 void *beginp;
 int totpg;
 struct node **p_to_node;
-
+static void InsertNode(int truerank,void *p){
+	struct node *nodep=malloc(sizeof(struct node));
+	nodep->p=p,nodep->use=0,nodep->next=list_begin_node[truerank],nodep->pre=NULL,nodep->rank=truerank;
+	if(list_begin_node[truerank]!=NULL)list_begin_node[truerank]->pre=nodep;
+	list_begin_node[truerank]=nodep;
+	p_to_node[(nodep->p-beginp)/4096]=nodep;
+}
 static void DeleteNode(struct node *p){
 	if(p->pre!=NULL)p->pre->next=p->next;
 	if(p->next!=NULL)p->next->pre=p->pre;
@@ -102,21 +108,13 @@ void *alloc_pages(int rank){
 		DeleteNode(ansnode);
 		for(int i=ansrank-1;i>=rank;i--){
 			if(i==rank){
-				struct node *p1=malloc(sizeof(struct node)),*p2=malloc(sizeof(struct node));
-				p1->p=currentp,p1->use=0,p1->next=p2,p1->pre=NULL,p1->rank=i;
-				p2->p=currentp+4096*(1<<i),p2->use=0,p2->next=list_begin_node[i],p2->pre=p1,p2->rank=i;
-				if(list_begin_node[i]!=NULL)list_begin_node[i]->pre=p2;
-				list_begin_node[i]=p1;
-				p_to_node[(p1->p-beginp)/4096]=p1,p_to_node[(p2->p-beginp)/4096]=p2;
-				p1->use=1;
-				return p1->p;
+				InsertNode(i,currentp+4096*(1<<i));
+				InsertNode(i,currentp);
+				p_to_node[(currentp-beginp)/4096]->use=1;
+				return currentp;
 			}
 			else {
-				struct node *p=malloc(sizeof(struct node));
-				p->p=currentp+4096*(1<<i),p->use=0,p->next=list_begin_node[i],p->pre=NULL,p->rank=i;
-				if(list_begin_node[i]!=NULL)list_begin_node[i]->pre=p;
-				list_begin_node[i]=p;
-				p_to_node[(p->p-beginp)/4096]=p;
+				InsertNode(i,currentp+4096*(1<<i));
 			}
 		}
 	}
@@ -150,12 +148,8 @@ int return_pages(void *p){
 		if(!isDelete)break;
 		FindAndDeleteNode(rank,p);
 		p_to_node[(p-beginp)/4096]=p_to_node[(p2-beginp)/4096]=NULL;
-		struct node *newnode=malloc(sizeof(struct node));
-		newnode->p=p<p2?p:p2,newnode->use=0,newnode->next=list_begin_node[rank+1],newnode->pre=NULL,newnode->rank=rank+1;
-		if(list_begin_node[rank+1]!=NULL)list_begin_node[rank+1]->pre=newnode;
-		list_begin_node[rank+1]=newnode;
-		p_to_node[(newnode->p-beginp)/4096]=newnode;
-		p=newnode->p;
+		InsertNode(rank+1,p<p2?p:p2);
+		p=p<p2?p:p2;
 		// printf("rank: %d -> %d\n",rank,rank+1);
 		rank++;
 	}
